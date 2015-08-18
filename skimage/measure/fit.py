@@ -485,6 +485,124 @@ class EllipseModel(BaseModel):
 
         return np.concatenate((x[..., None], y[..., None]), axis=t.ndim)
 
+class PlaneModel(BaseModel):
+
+    """Total least squares estimator for 3D planes.
+
+    planes are parameterized using three non collinear points ::
+
+        E: vec(x) =  vec(p1) + r * (vec(p2)-vec(p1)) + s * (vec(p3)-vec(p1))
+
+        where the normal vector is defined as
+
+        vec(n) = (vec(p2)-vec(p1)) x (vec(p3)-vec(p1))
+
+    Attributes
+    ----------
+    params : triple
+        plane model parameters in the following order `normal`, `dist`,  `vec_a`.
+
+    """
+
+
+    def estimate(self, data):
+
+        _check_data_dim(data, dim=3)
+
+        if data.shape[0] == 3:  # well determined plane with 3 points
+
+            vec_a = data[0]
+            vec_b = data[1]-data[0]
+            vec_c = data[2]-data[0]
+
+            normal = np.cross(vec_b, vec_c)
+            norm = np.linalg.norm(normal)
+            if norm != 0.:
+                normal /= norm
+                dist = vec_a.dot(normal)
+            else:
+                dist = np.inf # Penalty for zero division
+
+        elif data.shape[0] > 3:  # over-determined
+
+            Ex = data.mean(axis=0)
+            Exsqr = np.zeros([3, 3])
+            for i in range(0, (len(data))):
+                Exsqr += np.outer(data[i], data[i])
+            Exsqr /= len(data)
+            # Cov(X) = E(X*X^T) - mu*mu^T
+            cov = Exsqr - np.outer(Ex, Ex)
+            eigenValues,eigenVectors = np.linalg.eig(cov)
+
+            idx = eigenValues.argsort()[::-1]
+            eigenValues = eigenValues[idx]
+            eigenVectors = eigenVectors[:,idx]
+
+            normal = eigenVectors[:,len(eigenValues)-1]
+            dist=normal.dot(Ex)
+            vec_a = Ex
+
+        elif data.shape[0] < 3:  #  under-determined
+            raise ValueError('The data is under-determined with less than 3 points for the plane model')
+
+        # if dist < 0: # flipp normal
+        #     normal *= -1
+
+        self.params = (normal, dist, vec_a)
+
+        return True
+
+    def residuals(self, data):
+        """Determine residuals of data to model.
+
+        For each point the shortest distance to the plane is returned.
+
+        Parameters
+        ----------
+        data : (N, 3) array
+            N points with ``(x, y, z)`` coordinates, respectively.
+
+        Returns
+        -------
+        residuals : (N, ) array
+            Residual for each data point.
+
+        """
+
+        _check_data_dim(data, dim=3)
+
+        normal, dist, _ = self.params
+
+        # (normal * data)-d < threshold
+        return map(lambda p: np.fabs(normal.dot(p)-dist), data[:])
+
+    def estimate_bc(self, params=None):
+        """estimate vec(b) and vec(c) as unity vector using the estimated model.
+
+        Parameters
+        ----------
+        params : (3, ) array, optional
+            Optional custom parameter set.
+
+        Returns
+        -------
+        vec(b), vec(c) :
+            estimate vec(b) and vec(c)
+
+        """
+
+        if params is None:
+            params = self.params
+        normal, _, vec_a = params
+
+        vec_b = np.cross(vec_a,normal)
+        norm_b = np.linalg.norm(vec_b)
+        vec_b /= norm_b
+        vec_c = np.cross(normal, vec_b)
+        norm_c = np.linalg.norm(vec_b)
+        vec_c /= norm_c
+
+        return vec_b, vec_c
 
 def _dynamic_max_trials(n_inliers, n_samples, min_samples, probability):
     """Determine number trials such that at least one outlier-free subset is
