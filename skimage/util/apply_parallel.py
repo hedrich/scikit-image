@@ -5,12 +5,13 @@ __all__ = ['apply_parallel']
 
 
 def _get_chunks(shape, ncpu):
-    """
-    Split the array into equal sized chunks based on the number of
+    """Split the array into equal sized chunks based on the number of
     available processors. The last chunk in each dimension absorbs the
-    remainder array elements if the number of cpus does not divide evenly into
+    remainder array elements if the number of CPUs does not divide evenly into
     the number of array elements.
 
+    Examples
+    --------
     >>> _get_chunks((4, 4), 4)
     ((2, 2), (2, 2))
     >>> _get_chunks((4, 4), 2)
@@ -68,13 +69,18 @@ def apply_parallel(function, array, chunks=None, depth=0, mode=None,
     depth : int, optional
         Integer equal to the depth of the added boundary cells. Defaults to
         zero.
-    mode : 'reflect', 'periodic', 'wrap', 'nearest', optional
-        type of external boundary padding
+    mode : {'reflect', 'symmetric', 'periodic', 'wrap', 'nearest', 'edge'}, optional
+        type of external boundary padding.
     extra_arguments : tuple, optional
         Tuple of arguments to be passed to the function.
     extra_keywords : dictionary, optional
         Dictionary of keyword arguments to be passed to the function.
 
+    Notes
+    -----
+    Numpy edge modes 'symmetric', 'wrap', and 'edge' are converted to the
+    equivalent `dask` boundary modes 'reflect', 'periodic' and 'nearest',
+    respectively.
     """
     import dask.array as da
 
@@ -88,6 +94,10 @@ def apply_parallel(function, array, chunks=None, depth=0, mode=None,
 
     if mode == 'wrap':
         mode = 'periodic'
+    elif mode == 'symmetric':
+        mode = 'reflect'
+    elif mode == 'edge':
+        mode = 'nearest'
 
     def wrapped_func(arr):
         return function(arr, *extra_arguments, **extra_keywords)
